@@ -1,0 +1,114 @@
+#include "stdafx.h"
+#include "Hub.h"
+
+Hub::Hub()
+{
+	SOCKADDR_IN addr;
+	addr.sin_addr.s_addr = INADDR_ANY;
+	addr.sin_port = htons(2222);
+	addr.sin_family = AF_INET;
+
+	InitializeCriticalSection(&this->ready);
+
+	this->lis = socket(AF_INET, SOCK_STREAM, NULL);
+	bind(this->lis, (SOCKADDR*)&addr, sizeof(addr));
+	listen(this->lis, SOMAXCONN);
+}
+
+Hub::~Hub()
+{
+	for(int i=0; i<this->connection_list.size(); i++)
+	{
+		closesocket(this->connection_list[i].socket);
+	}
+	DeleteCriticalSection(&this->ready);
+	ExitProcess(0);
+}
+
+void Hub::wait_for_connection()
+{
+	connectionInfo inf;
+	int sizeofaddr = sizeof(inf.addr);
+	while (true)
+	{
+		inf.addr.sin_addr.s_addr = INADDR_ANY;
+		inf.addr.sin_port = htons(2222);
+		inf.addr.sin_family = AF_INET;
+		inf.socket = accept(this->lis, (SOCKADDR*)&inf.addr, &sizeofaddr);
+		hostent *client;
+		client = gethostbyaddr((char*)&inf.addr.sin_addr, 4, AF_INET);
+		strcpy(inf.name, client->h_name);
+		this->connection_list.push_back(inf);
+		CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)send_ip, this, 0, NULL);
+	}
+}
+
+void send_ip(Hub * hub)
+{
+	bool fl = true;
+	EnterCriticalSection(&hub->ready);
+	std::vector<connectionInfo>::iterator connection = hub->connection_list.begin();
+	for (int i = 0; i < hub->connection_list.size() - 1; i++)
+	{
+		connection++;
+	}
+	LeaveCriticalSection(&hub->ready);
+	std::vector<connectionInfo>::iterator it;
+	char l_c_d;
+	int size, i, request;
+	char ip[16];
+	try 
+	{
+		while (fl)
+		{
+			if (recv(connection->socket, &l_c_d, sizeof(char), 0) == SOCKET_ERROR)
+				throw std::exception("Can't recv message");
+			switch (l_c_d)
+			{
+			case 'l':
+				EnterCriticalSection(&hub->ready);
+				size = hub->connection_list.size();
+				size--;
+				if(send(connection->socket, (char*)&size, sizeof(int), 0)==SOCKET_ERROR)
+					throw std::exception("Can't send message");
+				for (it = hub->connection_list.begin(); it != hub->connection_list.end(); it++)
+					if (it->socket != connection->socket)
+						if(send(connection->socket, it->name, 256 * sizeof(char), 0)==SOCKET_ERROR)
+							throw std::exception("Can't send message");
+				LeaveCriticalSection(&hub->ready);
+				break;
+			case 'c':
+				if (recv(connection->socket, (char*)&request, sizeof(int), 0) == SOCKET_ERROR)
+					throw 0;
+				EnterCriticalSection(&hub->ready);
+				it = hub->connection_list.begin();
+				for (i = 0; i <= request; i++)
+				{
+					if (it->socket == connection->socket)
+						continue;
+					it++;
+				}
+				LeaveCriticalSection(&hub->ready);
+				strcpy(ip, inet_ntoa(it->addr.sin_addr));
+				if(send(connection->socket, ip, sizeof(ip), 0)==SOCKET_ERROR)
+					throw std::exception("Can't send message");
+				break;
+			case 'd':
+				closesocket(connection->socket);
+				EnterCriticalSection(&hub->ready);
+				hub->connection_list.erase(connection);
+				LeaveCriticalSection(&hub->ready);
+				fl = false;
+				break;
+			}
+		}
+	}
+	catch (std::exception &ex)
+	{
+		MessageBox(NULL, ex.what(), "ERROR", 0);
+		closesocket(connection->socket);
+		EnterCriticalSection(&hub->ready);
+		hub->connection_list.erase(connection);
+		LeaveCriticalSection(&hub->ready);
+	}
+}
