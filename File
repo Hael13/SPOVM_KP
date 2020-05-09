@@ -1,0 +1,116 @@
+#include "stdafx.h"
+#include "File.h"
+
+File::File():name("")
+{
+	this->file_handle = NULL;
+}
+
+File::File(const File& other)
+{
+	*this = other;
+}
+
+bool File::open()
+{
+	if (this->name == "")
+		return false;
+	bool is = true;
+	CloseHandle(this->file_handle);
+	this->file_handle = CreateFileA(this->name, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (this->file_handle == INVALID_HANDLE_VALUE)
+	{
+		this->file_handle = NULL;
+		is = false;
+		std::cout << "File isn't open" << std::endl;
+	}
+	return is;
+}
+
+bool File::open(const char* filename)
+{
+	strcpy_s(this->name, filename);
+	bool is = true;
+	CloseHandle(this->file_handle);
+	this->file_handle = CreateFileA(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (this->file_handle == INVALID_HANDLE_VALUE)
+	{
+		this->file_handle = NULL;
+		is = false;
+		std::cout << "File isn't open" << std::endl;
+	}
+	return is;
+}
+
+bool File::create(char* filename)
+{
+	strcpy_s(this->name, filename);
+	bool is = true;
+	CloseHandle(this->file_handle);
+	this->file_handle = CreateFileA(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, CREATE_ALWAYS, 0, NULL);
+	if (this->file_handle == INVALID_HANDLE_VALUE)
+	{
+		this->file_handle = NULL;
+		is = false;
+	}
+	this->close();
+	return is;
+}
+
+DWORD File::write(char * buf, int size)
+{
+	DWORD writen = 0;
+	if (buf != NULL && size > 0 && this->file_handle != NULL)
+		if (!WriteFile(this->file_handle, buf, size, &writen, NULL))
+			std::cout << "Write Error: " << GetLastError() << std::endl;
+	return writen;
+}
+
+DWORD File::read(char* buf, int size)
+{
+	DWORD readen = 0;
+	if (buf != NULL && size > 0 && this->file_handle != NULL)
+		if (!ReadFile(this->file_handle, buf, size, &readen, NULL))
+			std::cout << "Read Error: " << GetLastError() << std::endl;
+	return readen;
+}
+
+DWORD File::get_size()
+{
+	if (this->file_handle == NULL)
+		return 0;
+	return GetFileSize(this->file_handle, NULL);
+}
+
+char* File::get_name()
+{
+	return this->name;
+}
+
+void File::set(char* filename)
+{
+	this->close();
+	strcpy_s(this->name, filename);
+}
+
+void File::close()
+{
+	CloseHandle(this->file_handle);
+	this->file_handle = NULL;
+}
+
+File& File::operator=(const File& other)
+{
+	this->file_handle = other.file_handle;
+	strcpy_s(this->name, other.name);
+	return *this;
+}
+
+File::~File()
+{
+	if (this->file_handle == NULL)
+	{
+		CloseHandle(this->file_handle);
+		this->file_handle = NULL;
+	}
+}
