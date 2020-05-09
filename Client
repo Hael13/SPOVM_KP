@@ -1,0 +1,167 @@
+#include "stdafx.h"
+#include "Client.h"
+
+Client::Client()
+{
+}
+
+void Client::get_connection(char * ip)
+{
+}
+
+void Client::disconnect()
+{
+	if (this->server == INVALID_SOCKET)
+		return;
+	char l_c_d = 'd';
+	send(this->server, (char*)&l_c_d, sizeof(char), 0);
+	closesocket(this->server);
+}
+
+char** Client::recive_list()
+{
+	int i, size;
+	char **list;
+	char l_c_d = 'l';
+	send(this->server, (char*)&l_c_d, sizeof(char), 0);
+	if (recv(this->server, (char*)&size, sizeof(int), 0) == SOCKET_ERROR)
+		throw std::exception("Hub connection is missed");
+	list = new char*[size + 1];
+	list[size] = NULL;
+	for (i = 0; i < size; i++)
+	{
+		list[i] = new char[256];
+		if (recv(this->server, list[i], 256 * sizeof(char), 0) == SOCKET_ERROR)
+		{
+			for (int j = 0; j <= i; j++)
+				delete list[j];
+			delete list;
+			throw std::exception("Hub connection is missed");
+		}
+	}
+	return list;
+}
+
+void Client::get(int request)
+{
+}
+
+Client::~Client()
+{
+	closesocket(this->server);
+}
+
+void reciving(ConnectedToServer *client)
+{
+	File temp;
+	DWORD size;
+	int writen;
+	int sizeofaddr, request;
+	SOCKET sender;
+	char buf[16384];
+	//определение файла
+	temp = client->reciving_file;
+	temp.open();
+	if (recv(client->server, (char*)&size, sizeof(DWORD), 0) == SOCKET_ERROR)
+		throw std::exception("Server connection is missed");
+	//приём данных
+	while (size > 16384)
+	{
+		writen = 0;
+		writen = recv(client->server, buf, sizeof(buf), 0);
+		if (writen == SOCKET_ERROR)
+			throw std::exception("Server connection is missed");
+		temp.write(buf, writen);
+		size -= writen;
+	}
+	if (size > 0)
+	{
+		writen = 0;
+		writen = recv(client->server, buf, sizeof(buf), 0);
+		if (writen == SOCKET_ERROR)
+			throw std::exception("Server connection is missed");
+		temp.write(buf, writen);
+	}
+	temp.close();
+}
+
+ConnectedToServer::ConnectedToServer():Client()
+{
+
+}
+
+void ConnectedToServer::get_connection(char * ip)
+{
+	SOCKADDR_IN addr;
+	int sizeofaddr = sizeof(addr);
+	addr.sin_addr.s_addr = inet_addr(ip);
+	addr.sin_port = htons(1111);
+	addr.sin_family = AF_INET;
+
+	this->server = socket(AF_INET, SOCK_STREAM, NULL);
+	if (connect(this->server, (sockaddr*)&addr, sizeof(addr)) != 0) {
+		MessageBox(NULL, "error: failed connect to server", NULL, 0);
+		throw std::exception("Server connection is missed");
+	}
+
+	MessageBox(NULL, "Connected", NULL, 0);
+}
+
+void ConnectedToServer::get(int request)
+{
+	char *name;
+	GetInfoWindow giw(IDD_DIALOG3);
+	name = giw.get_inf();
+	this->reciving_file.create(name);
+	delete name;
+	char l_c_d = 'c';
+	send(this->server, (char*)&l_c_d, sizeof(char), 0);
+	send(this->server, (char*)&request, sizeof(int), 0);
+	reciving(this);
+}
+
+ConnectedToServer::~ConnectedToServer()
+{
+}
+
+ConnectedToHub::ConnectedToHub():Client()
+{
+
+}
+
+void ConnectedToHub::get_connection(char * ip)
+{
+	SOCKADDR_IN addr;
+	int sizeofaddr = sizeof(addr);
+	addr.sin_addr.s_addr = inet_addr(ip);
+	addr.sin_port = htons(2222);
+	addr.sin_family = AF_INET;
+
+	this->server = socket(AF_INET, SOCK_STREAM, NULL);
+	if (connect(this->server, (sockaddr*)&addr, sizeof(addr)) != 0) {
+		MessageBox(NULL, "error: failed connect to hub", NULL, 0);
+		throw std::exception("Hub connection is missed");
+	}
+
+	MessageBox(NULL, "Connected", NULL, 0);
+}
+
+void ConnectedToHub::get(int request)
+{
+	char ip[16];
+	STARTUPINFO start{ 0 };
+	PROCESS_INFORMATION info{ 0 };
+	SECURITY_ATTRIBUTES s = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+	char cmd[30] = "Client.exe ";
+	char l_c_d = 'c';
+	send(this->server, (char*)&l_c_d, sizeof(char), 0);
+	send(this->server, (char*)&request, sizeof(int), 0);
+	if (recv(this->server, ip, sizeof(ip), 0) == SOCKET_ERROR)
+		throw std::exception("Hub connection is missed");
+	strcat(cmd, ip);
+	CreateProcess(NULL, cmd, &s, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, NULL, &start, &info);
+}
+
+ConnectedToHub::~ConnectedToHub()
+{
+}
