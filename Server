@@ -1,0 +1,219 @@
+#include "stdafx.h"
+#include "Server.h"
+
+Server::Server()
+{
+	char name[256];
+	File shared_list, temp;
+	if (shared_list.open("shared.txt"))
+	{
+		while (shared_list.read(name, 256*sizeof(char)) > 0)
+		{
+			if (temp.open(name))
+			{
+				temp.close();
+				this->shared.push_back(temp);
+			}
+		}
+		shared_list.close();
+	}
+
+	InitializeCriticalSection(&this->ready);
+
+	this->addr.sin_addr.s_addr = INADDR_ANY;
+	this->addr.sin_port = htons(1111);
+	this->addr.sin_family = AF_INET;
+
+	this->lis = socket(AF_INET, SOCK_STREAM, NULL);
+	bind(this->lis, (SOCKADDR*)&this->addr, sizeof(addr));
+	listen(this->lis, SOMAXCONN);
+	CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)get_connection, this, NULL, NULL);
+}
+
+bool Server::add(char* filename)
+{
+	EnterCriticalSection(&this->ready);
+	File temp;
+	if (!temp.open(filename))
+	{
+		return false;
+	}
+	else
+	{
+		this->shared.push_back(temp);
+	}
+	LeaveCriticalSection(&this->ready);
+	return true;
+}
+
+void Server::delete_file(char * filename)
+{
+	EnterCriticalSection(&this->ready);
+	std::vector<File>::iterator it;
+	for (it = this->shared.begin(); it != this->shared.end(); it++)
+	{
+		if (strcmp(it->get_name(), filename) == 0)
+		{
+			this->shared.erase(it);
+			break;
+		}
+	}
+	LeaveCriticalSection(&this->ready);
+}
+
+void Server::delete_file(int index)
+{
+	EnterCriticalSection(&this->ready);
+	int i;
+	std::vector<File>::iterator it;
+	for (i = 0, it = this->shared.begin(); i < index; i++, it++);
+	this->shared.erase(it);
+	LeaveCriticalSection(&this->ready);
+}
+
+char * Server::filename(int index)
+{
+	if (index >= 0 && index < this->shared.size())
+	{
+		return this->shared[index].get_name();
+	}
+	else
+	{
+		return nullptr;
+	}
+}
+
+int Server::find_file(char * filename)
+{
+	for (int i = 0; i < this->shared.size(); i++)
+	{
+		if (strcmp(this->shared[i].get_name(), filename) == 0)
+		{
+			return i;
+		}
+	}
+	return -1;
+}
+
+Server::~Server()
+{
+	for (int i = 0; i < this->connection_list.size(); i++)
+	{
+		closesocket(this->connection_list[i]);
+	}
+	File shared_list;
+	shared_list.create("shared.txt");
+	shared_list.open();
+	for (int i = 0; i < this->shared.size(); i++)
+	{
+		shared_list.write(this->shared[i].get_name(), 256 * sizeof(char));
+	}
+	shared_list.close();
+	DeleteCriticalSection(&this->ready);
+	ExitProcess(0);
+}
+
+void get_connection(Server *server)
+{
+	SOCKADDR_IN addr = { 0 };
+	int i;
+	int sizeofaddr = sizeof(addr);
+	while (true)
+	{
+		addr.sin_addr.s_addr = INADDR_ANY;
+		addr.sin_port = htons(1111);
+		addr.sin_family = AF_INET;
+		server->connection_list.push_back(accept(server->lis, (SOCKADDR*)&addr, &sizeofaddr));
+
+		CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)work_with_client, server, NULL, NULL);
+	}
+}
+
+void work_with_client(Server * server)
+{
+	EnterCriticalSection(&server->ready);
+	std::vector<SOCKET>::iterator connection = server->connection_list.begin();
+	for (int i = 0; i < server->connection_list.size() - 1; i++)
+	{
+		connection++;
+	}
+	LeaveCriticalSection(&server->ready);
+	bool fl = true;
+	char l_c_d;
+	File temp;
+	std::vector<SOCKET>::iterator it;
+	int sizeoflist, i, request;
+	try
+	{
+		while (fl)
+		{
+			if (recv(*connection, (char*)&l_c_d, sizeof(char), 0) == SOCKET_ERROR)
+				throw std::exception("Can't recv message");
+			switch (l_c_d)
+			{
+			case 'l':
+				EnterCriticalSection(&server->ready);
+				sizeoflist = server->shared.size();
+				if(send(*connection, (char*)&sizeoflist, sizeof(int), 0)==SOCKET_ERROR)
+					throw std::exception("Can't send message");
+				for (i = 0; i < server->shared.size(); i++)
+					if (send(*connection, server->shared[i].get_name(), 256 * sizeof(char), 0) == SOCKET_ERROR)
+						throw std::exception("Can't send message");
+				LeaveCriticalSection(&server->ready);
+				break;
+			case 'c':
+				if (recv(*connection, (char*)&request, sizeof(int), 0) == SOCKET_ERROR)	
+					throw std::exception("Can't recv message");
+				temp = server->shared[request];
+				sending(*connection, temp);
+				break;
+			case 'd':
+				closesocket(*connection);
+				EnterCriticalSection(&server->ready);
+				server->connection_list.erase(connection);
+				LeaveCriticalSection(&server->ready);
+				fl = false;
+				break;
+			}
+		}
+	}
+	catch (std::exception &ex)
+	{
+		MessageBox(NULL, ex.what(), "ERROR", 0);
+		closesocket(*connection);
+		EnterCriticalSection(&server->ready);
+		server->connection_list.erase(connection);
+		LeaveCriticalSection(&server->ready);
+	}
+}
+
+void sending(SOCKET reciver, File sending_file)
+{ 
+	DWORD size, readen;
+	char buf[16384];
+
+	//посылка данных
+	sending_file.open();
+
+	size = sending_file.get_size();
+
+	if (send(reciver, (char*)&size, sizeof(DWORD), 0) == SOCKET_ERROR)
+	{
+		sending_file.close();
+		throw std::exception("Can't send message");
+	}
+
+	while (size > 0)
+	{
+		readen = 0;
+		readen = sending_file.read(buf, 16384);
+		if (send(reciver, buf, readen, 0) == SOCKET_ERROR)
+		{
+			sending_file.close();
+			throw std::exception("Can't send message");
+		}
+		size -= readen;
+	}
+
+	sending_file.close();
+}
