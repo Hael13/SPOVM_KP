@@ -1,0 +1,62 @@
+#include "stdafx.h"
+#include "ConnectedToHub.h"
+
+
+ConnectedToHub::ConnectedToHub() :Client()
+{
+
+}
+
+void ConnectedToHub::get_connection(char * ip)
+{
+	SOCKADDR_IN addr;
+	int sizeofaddr = sizeof(addr);
+	addr.sin_addr.s_addr = inet_addr(ip);
+	addr.sin_port = htons(2222);
+	addr.sin_family = AF_INET;
+
+	this->server = socket(AF_INET, SOCK_STREAM, NULL);
+	if (connect(this->server, (sockaddr*)&addr, sizeof(addr)) != 0)
+		throw std::exception("Hub connection is missed");
+
+	std::cout << "Connected to hub" << std::endl;
+}
+
+void ConnectedToHub::get()
+{
+
+	int request;
+
+	std::cout << "Choose User: ";
+	std::cin >> request;
+	std::getchar();
+	request--;
+
+	char ip[16];
+	char l_c_d = 'c';
+	send(this->server, (char*)&l_c_d, sizeof(char), 0);
+	send(this->server, (char*)&request, sizeof(int), 0);
+	if(recv(this->server, (char*)&request, sizeof(int), 0) == 0)
+		throw std::exception("Hub connection is missed");
+	if (request == -1)
+		throw UserException("No such server");
+	if (recv(this->server, ip, sizeof(ip), 0) == 0)
+		throw std::exception("Hub connection is missed");
+	ConnectedToServer *client;
+	client = new ConnectedToServer();
+	client->get_connection(ip);
+	client->work();
+	delete client;
+}
+
+void ConnectedToHub::help()
+{
+	system("cls");
+	std::cout << "1.Connection's list" << std::endl;
+	std::cout << "2.Connect to server" << std::endl;
+	std::cout << "0.Disconnect" << std::endl;
+}
+
+ConnectedToHub::~ConnectedToHub()
+{
+}
